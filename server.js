@@ -1,5 +1,6 @@
 require("dotenv").config();
 
+const path = require("path");
 const express = require("express");
 const cors = require("cors");
 const { parse } = require("csv-parse/sync");
@@ -8,10 +9,15 @@ const { optimizeRoute } = require("./src/services/optimize");
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
+const publicDir = path.join(__dirname, "public");
 
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
-app.use(express.static("public"));
+app.use(express.static(publicDir));
+
+app.get("/", (req, res) => {
+  return res.sendFile(path.join(publicDir, "index.html"));
+});
 
 function normalizeInputAddresses({ addresses, pastedText, csvText }) {
   const fromList = Array.isArray(addresses) ? addresses : [];
@@ -113,6 +119,10 @@ app.post("/api/optimize-route", async (req, res) => {
   }
 });
 
-app.listen(port, () => {
-  console.log(`Best-Route server running on http://localhost:${port}`);
-});
+if (process.env.VERCEL !== "1") {
+  app.listen(port, () => {
+    console.log(`Best-Route server running on http://localhost:${port}`);
+  });
+}
+
+module.exports = app;
