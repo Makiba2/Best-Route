@@ -1,0 +1,407 @@
+const map = L.map("map").setView([5.6037, -0.187], 11);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19,
+  attribution: "&copy; OpenStreetMap contributors",
+}).addTo(map);
+
+const optimizeBtn = document.getElementById("optimizeBtn");
+const sidebarEl = document.getElementById("sidebar");
+const openSidebarBtn = document.getElementById("openSidebarBtn");
+const closeSidebarBtn = document.getElementById("closeSidebarBtn");
+const useGpsBtn = document.getElementById("useGpsBtn");
+const followGpsBtn = document.getElementById("followGpsBtn");
+const providerEl = document.getElementById("provider");
+const transportModeEl = document.getElementById("transportMode");
+const startAddressEl = document.getElementById("startAddress");
+const pastedTextEl = document.getElementById("pastedText");
+const csvFileEl = document.getElementById("csvFile");
+const gpsStatusEl = document.getElementById("gpsStatus");
+const followStatusEl = document.getElementById("followStatus");
+const nextStopHintEl = document.getElementById("nextStopHint");
+const statusEl = document.getElementById("status");
+const unresolvedWrapEl = document.getElementById("unresolvedWrap");
+const unresolvedListEl = document.getElementById("unresolvedList");
+const stopsListEl = document.getElementById("stopsList");
+const totalsEl = document.getElementById("totals");
+
+let markers = [];
+let routeLayer = null;
+let selectedGpsStart = null;
+let liveLocationMarker = null;
+let liveWatchId = null;
+let currentRouteStops = [];
+const mobileMediaQuery = window.matchMedia("(max-width: 900px)");
+
+function setStatus(message, isError = false) {
+  statusEl.textContent = message;
+  statusEl.style.color = isError ? "#b20020" : "#394451";
+}
+
+function clearMap() {
+  markers.forEach((marker) => marker.remove());
+  markers = [];
+
+  if (routeLayer) {
+    routeLayer.remove();
+    routeLayer = null;
+  }
+
+  if (liveLocationMarker) {
+    liveLocationMarker.remove();
+    liveLocationMarker = null;
+  }
+}
+
+function isMobileView() {
+  return mobileMediaQuery.matches;
+}
+
+function openSidebar() {
+  if (!isMobileView()) return;
+  sidebarEl.classList.add("mobile-open");
+  document.body.classList.add("sidebar-open");
+  window.setTimeout(() => map.invalidateSize(), 260);
+}
+
+function closeSidebar() {
+  if (!isMobileView()) return;
+  sidebarEl.classList.remove("mobile-open");
+  document.body.classList.remove("sidebar-open");
+  window.setTimeout(() => map.invalidateSize(), 260);
+}
+
+function renderUnresolved(unresolved = []) {
+  unresolvedListEl.innerHTML = "";
+
+  if (!unresolved.length) {
+    unresolvedWrapEl.classList.add("hidden");
+    return;
+  }
+
+  for (const address of unresolved) {
+    const li = document.createElement("li");
+    li.textContent = address;
+    unresolvedListEl.appendChild(li);
+  }
+
+  unresolvedWrapEl.classList.remove("hidden");
+}
+
+openSidebarBtn.addEventListener("click", openSidebar);
+closeSidebarBtn.addEventListener("click", closeSidebar);
+mobileMediaQuery.addEventListener("change", () => {
+  if (!isMobileView()) {
+    sidebarEl.classList.remove("mobile-open");
+    document.body.classList.remove("sidebar-open");
+    map.invalidateSize();
+  }
+});
+
+function readCsvFile(file) {
+  return new Promise((resolve, reject) => {
+    if (!file) return resolve("");
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = reject;
+    reader.readAsText(file);
+  });
+}
+
+function decodePolyline(encoded) {
+  const coordinates = [];
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+
+  while (index < encoded.length) {
+    let b;
+    let shift = 0;
+    let result = 0;
+
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+
+    const dlat = result & 1 ? ~(result >> 1) : result >> 1;
+    lat += dlat;
+
+    shift = 0;
+    result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+
+    const dlng = result & 1 ? ~(result >> 1) : result >> 1;
+    lng += dlng;
+
+    coordinates.push([lat / 1e5, lng / 1e5]);
+  }
+
+  return coordinates;
+}
+
+function createNumberedIcon(sequence) {
+  return L.divIcon({
+    className: "numbered-stop-wrapper",
+    html: `<div class="numbered-stop-icon">${sequence}</div>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+  });
+}
+
+function createStartIcon() {
+  return L.divIcon({
+    className: "start-stop-wrapper",
+    html: '<div class="start-stop-icon">S</div>',
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+  });
+}
+
+function createLiveIcon() {
+  return L.divIcon({
+    className: "live-stop-wrapper",
+    html: '<div class="start-stop-icon">ME</div>',
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+  });
+}
+
+function setGpsStatus(message, isError = false) {
+  gpsStatusEl.textContent = message;
+  gpsStatusEl.style.color = isError ? "#b20020" : "#394451";
+}
+
+function setFollowStatus(message, isError = false) {
+  followStatusEl.textContent = message;
+  followStatusEl.style.color = isError ? "#b20020" : "#394451";
+}
+
+function findNearestStop(currentLocation, stops) {
+  if (!stops.length) return null;
+
+  let bestStop = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const stop of stops) {
+    const dx = stop.location.lat - currentLocation.lat;
+    const dy = stop.location.lng - currentLocation.lng;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestStop = stop;
+    }
+  }
+
+  return bestStop;
+}
+
+useGpsBtn.addEventListener("click", async () => {
+  if (!navigator.geolocation) {
+    setGpsStatus("GPS is not supported in this browser.", true);
+    return;
+  }
+
+  useGpsBtn.disabled = true;
+  setGpsStatus("Getting your location...");
+
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      selectedGpsStart = {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+      };
+      startAddressEl.value = "";
+      setGpsStatus("GPS location selected.");
+      useGpsBtn.disabled = false;
+    },
+    (error) => {
+      selectedGpsStart = null;
+      setGpsStatus(`Unable to get GPS location (${error.message}).`, true);
+      useGpsBtn.disabled = false;
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 0,
+    },
+  );
+});
+
+startAddressEl.addEventListener("input", () => {
+  if (startAddressEl.value.trim()) {
+    selectedGpsStart = null;
+    setGpsStatus("");
+  }
+});
+
+followGpsBtn.addEventListener("click", () => {
+  if (!navigator.geolocation) {
+    setFollowStatus("Live follow is not supported in this browser.", true);
+    return;
+  }
+
+  if (liveWatchId !== null) {
+    navigator.geolocation.clearWatch(liveWatchId);
+    liveWatchId = null;
+    followGpsBtn.textContent = "Start Live Follow";
+    setFollowStatus("Live follow stopped.");
+    nextStopHintEl.textContent = "";
+    if (liveLocationMarker) {
+      liveLocationMarker.remove();
+      liveLocationMarker = null;
+    }
+    return;
+  }
+
+  followGpsBtn.textContent = "Stop Live Follow";
+  setFollowStatus("Following your movement...");
+  liveWatchId = navigator.geolocation.watchPosition(
+    (position) => {
+      const current = {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+      };
+
+      if (!liveLocationMarker) {
+        liveLocationMarker = L.marker([current.lat, current.lng], {
+          icon: createLiveIcon(),
+        }).addTo(map);
+      } else {
+        liveLocationMarker.setLatLng([current.lat, current.lng]);
+      }
+
+      map.setView([current.lat, current.lng], Math.max(map.getZoom(), 14));
+
+      const nearestStop = findNearestStop(current, currentRouteStops);
+      if (nearestStop) {
+        nextStopHintEl.textContent = `Nearest next stop: #${nearestStop.sequence} - ${nearestStop.standardizedAddress || nearestStop.rawAddress}`;
+      } else {
+        nextStopHintEl.textContent = "Optimize a route to see your next stop.";
+      }
+    },
+    (error) => {
+      setFollowStatus(`Live follow error (${error.message}).`, true);
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 0,
+    },
+  );
+});
+
+function drawRoute(routeData) {
+  clearMap();
+
+  const stops = routeData.orderedStops || [];
+  const startPoint = routeData.startPoint || null;
+  if (!stops.length && !startPoint) return;
+
+  if (startPoint?.location) {
+    const startMarker = L.marker([startPoint.location.lat, startPoint.location.lng], {
+      icon: createStartIcon(),
+    }).addTo(map);
+    startMarker.bindPopup(`<strong>Start Point</strong><br>${startPoint.standardizedAddress || startPoint.rawAddress || "Selected start location"}`);
+    markers.push(startMarker);
+  }
+
+  stops.forEach((stop) => {
+    const marker = L.marker([stop.location.lat, stop.location.lng], {
+      icon: createNumberedIcon(stop.sequence),
+    }).addTo(map);
+    marker.bindPopup(`<strong>Stop ${stop.sequence}</strong><br>${stop.standardizedAddress}`);
+    markers.push(marker);
+  });
+
+  let lineCoords = null;
+  if (routeData.geometry?.coordinates) {
+    lineCoords = routeData.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+  } else if (routeData.directionsOverviewPolyline) {
+    lineCoords = decodePolyline(routeData.directionsOverviewPolyline);
+  }
+
+  if (lineCoords?.length) {
+    routeLayer = L.polyline(lineCoords, { color: "#0a63ff", weight: 4 }).addTo(map);
+    map.fitBounds(routeLayer.getBounds(), { padding: [20, 20] });
+  } else if (markers.length) {
+    const group = L.featureGroup(markers);
+    map.fitBounds(group.getBounds(), { padding: [20, 20] });
+  }
+}
+
+function renderStopList(stops) {
+  stopsListEl.innerHTML = "";
+  for (const stop of stops) {
+    const li = document.createElement("li");
+    li.textContent = stop.standardizedAddress || stop.rawAddress;
+    stopsListEl.appendChild(li);
+  }
+}
+
+optimizeBtn.addEventListener("click", async () => {
+  try {
+    setStatus("Optimizing route...");
+    optimizeBtn.disabled = true;
+    renderUnresolved([]);
+
+    const csvText = await readCsvFile(csvFileEl.files?.[0]);
+    const startAddress = startAddressEl.value.trim();
+    const startLocation = selectedGpsStart && !startAddress ? selectedGpsStart : null;
+
+    const payload = {
+      provider: providerEl.value,
+      transportMode: transportModeEl.value,
+      pastedText: pastedTextEl.value,
+      csvText,
+      startAddress,
+      startLocation,
+    };
+
+    const response = await fetch("/api/optimize-route", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      const unresolved = [
+        ...(Array.isArray(data.unresolved) ? data.unresolved : []),
+        ...(data.unresolvedStart ? [data.unresolvedStart] : []),
+      ];
+      renderUnresolved(unresolved);
+      setStatus(data.error || "Failed to optimize route.", true);
+      totalsEl.textContent = "";
+      stopsListEl.innerHTML = "";
+      currentRouteStops = [];
+      nextStopHintEl.textContent = "";
+      clearMap();
+      return;
+    }
+
+    const skippedStops = Array.isArray(data.meta?.unresolved) ? data.meta.unresolved : [];
+    const skippedStart = data.meta?.unresolvedStart ? [data.meta.unresolvedStart] : [];
+    renderUnresolved([...skippedStops, ...skippedStart]);
+
+    currentRouteStops = data.route.orderedStops || [];
+    renderStopList(data.route.orderedStops);
+    drawRoute(data.route);
+    totalsEl.textContent = `Distance: ${data.route.estimated.totalDistanceKm} km | Duration: ${data.route.estimated.totalDurationMin} mins`;
+    if (skippedStops.length || skippedStart.length) {
+      setStatus(
+        `Route ready. Skipped ${skippedStops.length + skippedStart.length} location(s) not found.`,
+      );
+    } else {
+      setStatus(`Success. Strategy: ${data.meta.strategy}`);
+    }
+  } catch (error) {
+    setStatus(error.message, true);
+  } finally {
+    optimizeBtn.disabled = false;
+    closeSidebar();
+  }
+});

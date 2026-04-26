@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Best Route - Delivery Optimizer</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar" id="sidebar">
+        <h1>Delivery Routing System</h1>
+        <p>Optimize 1 to 100+ stops using Google or OSM.</p>
+
+        <label>Provider</label>
+        <select id="provider">
+          <option value="osm">OpenStreetMap (Nominatim + OSRM)</option>
+          <option value="google">Google Maps APIs</option>
+        </select>
+
+        <label>Transport Mode</label>
+        <select id="transportMode">
+          <option value="driving">Driving</option>
+          <option value="walking">Walking</option>
+        </select>
+
+        <label>Starting Point (Optional)</label>
+        <div class="start-point">
+          <button id="useGpsBtn" type="button">Use My GPS Location</button>
+          <button id="followGpsBtn" type="button">Start Live Follow</button>
+          <div id="gpsStatus"></div>
+          <div id="followStatus"></div>
+          <div id="nextStopHint"></div>
+          <input
+            id="startAddress"
+            type="text"
+            placeholder="Or type a starting location (e.g. East Legon, Accra)"
+          />
+        </div>
+
+        <label>Manual Addresses (one per line)</label>
+        <textarea id="pastedText" rows="8" placeholder="Enter addresses..."></textarea>
+
+        <label>Or Upload CSV</label>
+        <input id="csvFile" type="file" accept=".csv" />
+
+        <button id="optimizeBtn">Optimize Route</button>
+        <div id="status"></div>
+        <div id="unresolvedWrap" class="unresolved hidden">
+          <strong>Could not find these locations:</strong>
+          <ul id="unresolvedList"></ul>
+        </div>
+
+        <h2>Optimized Stops</h2>
+        <ol id="stopsList"></ol>
+        <div id="totals"></div>
+      </aside>
+
+      <main class="map-wrap">
+        <button id="openSidebarBtn" class="mobile-menu-btn" type="button">Menu</button>
+        <button id="closeSidebarBtn" class="mobile-close-btn" type="button">Close</button>
+        <div id="map"></div>
+      </main>
+    </div>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="/app.js"></script>
+  </body>
+</html>

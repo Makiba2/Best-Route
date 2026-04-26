@@ -1,0 +1,231 @@
+* {
+  box-sizing: border-box;
+  font-family: Arial, sans-serif;
+}
+
+body {
+  margin: 0;
+  background: #f4f6f8;
+}
+
+body.sidebar-open {
+  overflow: hidden;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 420px 1fr;
+  height: 100vh;
+}
+
+.sidebar {
+  padding: 16px;
+  overflow-y: auto;
+  border-right: 1px solid #dde3ea;
+  background: #fff;
+}
+
+.sidebar h1 {
+  margin: 0 0 8px;
+  font-size: 22px;
+}
+
+.sidebar p {
+  margin: 0 0 12px;
+  color: #48515d;
+}
+
+label {
+  display: block;
+  font-size: 13px;
+  margin: 10px 0 6px;
+  color: #2d3641;
+}
+
+textarea,
+select,
+input[type="file"],
+input[type="text"] {
+  width: 100%;
+}
+
+textarea,
+select,
+input[type="text"] {
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid #c7d0da;
+}
+
+.start-point {
+  display: grid;
+  gap: 8px;
+}
+
+#useGpsBtn {
+  margin-top: 0;
+}
+
+#followGpsBtn {
+  margin-top: 0;
+  background: #0f766e;
+}
+
+#gpsStatus {
+  font-size: 12px;
+  color: #394451;
+}
+
+#followStatus,
+#nextStopHint {
+  font-size: 12px;
+  color: #394451;
+}
+
+button {
+  margin-top: 12px;
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  padding: 11px;
+  background: #1b6ef3;
+  color: #fff;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+#status {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #394451;
+}
+
+.unresolved {
+  margin-top: 8px;
+  background: #fff1f2;
+  border: 1px solid #fecdd3;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: #9f1239;
+}
+
+.unresolved ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.hidden {
+  display: none;
+}
+
+.numbered-stop-icon,
+.start-stop-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+.numbered-stop-icon {
+  background: #1b6ef3;
+  color: #fff;
+}
+
+.start-stop-icon {
+  background: #22c55e;
+  color: #fff;
+}
+
+#stopsList {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  font-size: 14px;
+}
+
+#totals {
+  margin-top: 12px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.map-wrap {
+  position: relative;
+  padding: 10px;
+}
+
+#map {
+  width: 100%;
+  height: calc(100vh - 20px);
+  border-radius: 10px;
+}
+
+.mobile-menu-btn,
+.mobile-close-btn {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .layout {
+    display: block;
+    height: 100vh;
+    position: relative;
+  }
+
+  .sidebar {
+    position: fixed;
+    z-index: 2000;
+    inset: 0 auto 0 0;
+    width: min(88vw, 360px);
+    max-width: 360px;
+    height: 100vh;
+    border-right: 1px solid #dde3ea;
+    transform: translateX(-102%);
+    transition: transform 0.25s ease;
+    box-shadow: 8px 0 22px rgba(0, 0, 0, 0.18);
+  }
+
+  .sidebar.mobile-open {
+    transform: translateX(0);
+  }
+
+  .map-wrap {
+    padding: 0;
+    height: 100vh;
+  }
+
+  #map {
+    height: 100vh;
+    border-radius: 0;
+  }
+
+  .mobile-menu-btn,
+  .mobile-close-btn {
+    display: inline-block;
+    position: absolute;
+    z-index: 1500;
+    width: auto;
+    margin: 0;
+    padding: 10px 14px;
+    font-size: 13px;
+    border-radius: 999px;
+  }
+
+  .mobile-menu-btn {
+    top: 12px;
+    left: 12px;
+    background: #0f172a;
+  }
+
+  .mobile-close-btn {
+    top: 12px;
+    right: 12px;
+    background: #334155;
+  }
+}
