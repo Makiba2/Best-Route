@@ -23,6 +23,60 @@ function normalizeAddressInput(address) {
     .trim();
 }
 
+function extractLatLngFromText(value) {
+  const match = String(value || "")
+    .trim()
+    .match(/(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)/);
+
+  if (!match) return null;
+  const lat = Number(match[1]);
+  const lng = Number(match[2]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  return { lat, lng };
+}
+
+function parseGoogleMapsLink(input) {
+  const raw = String(input || "").trim();
+  if (!/^https?:\/\//i.test(raw)) return null;
+
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(raw);
+  } catch (error) {
+    return null;
+  }
+
+  const host = parsedUrl.hostname.toLowerCase();
+  if (!host.includes("google.") && !host.includes("goo.gl")) return null;
+
+  const queryCandidates = [
+    parsedUrl.searchParams.get("q"),
+    parsedUrl.searchParams.get("query"),
+    parsedUrl.searchParams.get("destination"),
+    decodeURIComponent(parsedUrl.pathname || "").split("/").find((part) => part.startsWith("@")),
+  ].filter(Boolean);
+
+  for (const candidate of queryCandidates) {
+    const fromAtPath = candidate.startsWith("@") ? candidate.slice(1) : candidate;
+    const latLng = extractLatLngFromText(fromAtPath);
+    if (latLng) {
+      return {
+        ...latLng,
+        standardizedAddress: `Google Maps pin (${latLng.lat}, ${latLng.lng})`,
+      };
+    }
+  }
+
+  return {
+    searchText:
+      parsedUrl.searchParams.get("q") ||
+      parsedUrl.searchParams.get("query") ||
+      parsedUrl.searchParams.get("destination") ||
+      null,
+  };
+}
+
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -38,6 +92,11 @@ async function throttleOsmRequests() {
 
 function buildGeocodeQueries(address) {
   const raw = normalizeAddressInput(address);
+  const fromGoogleLink = parseGoogleMapsLink(raw);
+  if (fromGoogleLink?.searchText) {
+    return buildGeocodeQueries(fromGoogleLink.searchText);
+  }
+
   const queries = [raw];
 
   // If users paste CSV-like lines with extra columns, try the first segment too.
@@ -155,6 +214,17 @@ async function geocodeAddresses(addresses, provider = "osm") {
 
   for (const address of addresses) {
     let location = null;
+
+    const googleLink = parseGoogleMapsLink(address);
+    if (googleLink?.lat !== undefined && googleLink?.lng !== undefined) {
+      results.push({
+        rawAddress: address,
+        standardizedAddress: googleLink.standardizedAddress,
+        location: { lat: googleLink.lat, lng: googleLink.lng },
+      });
+      continue;
+    }
+
     try {
       if (normalizedProvider === "google") {
         // Prefer Google when selected, but fall back to OSM if Google misses/rejects.
