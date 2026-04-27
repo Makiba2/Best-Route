@@ -230,4 +230,12 @@ button {
     right: 12px;
     background: #334155;
   }
+
+  body.sidebar-open .mobile-menu-btn {
+    display: none;
+  }
+
+  body:not(.sidebar-open) .mobile-close-btn {
+    display: none;
+  }
 }

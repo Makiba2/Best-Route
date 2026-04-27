@@ -56,10 +56,23 @@ function isMobileView() {
   return mobileMediaQuery.matches;
 }
 
+function syncMobileNavButtons() {
+  if (!isMobileView()) {
+    openSidebarBtn.style.display = "none";
+    closeSidebarBtn.style.display = "none";
+    return;
+  }
+
+  const isOpen = sidebarEl.classList.contains("mobile-open");
+  openSidebarBtn.style.display = isOpen ? "none" : "inline-block";
+  closeSidebarBtn.style.display = isOpen ? "inline-block" : "none";
+}
+
 function openSidebar() {
   if (!isMobileView()) return;
   sidebarEl.classList.add("mobile-open");
   document.body.classList.add("sidebar-open");
+  syncMobileNavButtons();
   window.setTimeout(() => map.invalidateSize(), 260);
 }
 
@@ -67,6 +80,7 @@ function closeSidebar() {
   if (!isMobileView()) return;
   sidebarEl.classList.remove("mobile-open");
   document.body.classList.remove("sidebar-open");
+  syncMobileNavButtons();
   window.setTimeout(() => map.invalidateSize(), 260);
 }
 
@@ -95,7 +109,9 @@ mobileMediaQuery.addEventListener("change", () => {
     document.body.classList.remove("sidebar-open");
     map.invalidateSize();
   }
+  syncMobileNavButtons();
 });
+syncMobileNavButtons();
 
 function readCsvFile(file) {
   return new Promise((resolve, reject) => {
