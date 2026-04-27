@@ -71,7 +71,7 @@ function nearestNeighborOrderFromStart(stops, startLocation) {
   return ordered;
 }
 
-function getRouteDistanceByOrder(stops, orderIndexes, startLocation = null) {
+function getRouteDistanceByOrder(stops, orderIndexes, startLocation = null, endLocation = null) {
   if (!orderIndexes.length) return 0;
 
   let totalDistance = 0;
@@ -85,15 +85,22 @@ function getRouteDistanceByOrder(stops, orderIndexes, startLocation = null) {
     totalDistance += euclideanDistance(current, next);
   }
 
+  if (endLocation) {
+    totalDistance += euclideanDistance(
+      stops[orderIndexes[orderIndexes.length - 1]].location,
+      endLocation,
+    );
+  }
+
   return totalDistance;
 }
 
-function improveOrderWithTwoOpt(stops, initialOrder, startLocation = null) {
+function improveOrderWithTwoOpt(stops, initialOrder, startLocation = null, endLocation = null) {
   if (initialOrder.length < 4) return initialOrder;
 
   const order = [...initialOrder];
   let improved = true;
-  let bestDistance = getRouteDistanceByOrder(stops, order, startLocation);
+  let bestDistance = getRouteDistanceByOrder(stops, order, startLocation, endLocation);
   let passes = 0;
   const maxPasses = 6;
 
@@ -113,6 +120,7 @@ function improveOrderWithTwoOpt(stops, initialOrder, startLocation = null) {
           stops,
           candidate,
           startLocation,
+          endLocation,
         );
         if (candidateDistance + 1e-9 < bestDistance) {
           order.splice(0, order.length, ...candidate);
@@ -211,13 +219,19 @@ async function fetchGoogleDirections(stops, transportMode = "driving") {
   };
 }
 
-async function optimizeRoute(stops, { transportMode, provider, startPoint = null }) {
+async function optimizeRoute(stops, { transportMode, provider, startPoint = null, endPoint = null }) {
   const strategy = stops.length < 20 ? "directions-optimized" : "tsp-nearest-neighbor-2opt";
   const hasStartPoint = Boolean(startPoint?.location);
+  const hasEndPoint = Boolean(endPoint?.location);
   const startLocation = hasStartPoint ? startPoint.location : null;
+  const endLocation = hasEndPoint ? endPoint.location : null;
 
   if (stops.length === 1) {
-    const coordinates = hasStartPoint ? [startLocation, stops[0].location] : [stops[0].location];
+    const coordinates = [
+      ...(hasStartPoint ? [startLocation] : []),
+      stops[0].location,
+      ...(hasEndPoint ? [endLocation] : []),
+    ];
     const routeStats =
       coordinates.length > 1 ? await fetchOsrmRoute(coordinates, transportMode) : null;
 
@@ -225,6 +239,7 @@ async function optimizeRoute(stops, { transportMode, provider, startPoint = null
       provider,
       strategy: hasStartPoint ? "single-stop-from-start" : "single-stop",
       startPoint: hasStartPoint ? startPoint : null,
+      endPoint: hasEndPoint ? endPoint : null,
       orderedStops: [
         {
           sequence: 1,
@@ -242,7 +257,7 @@ async function optimizeRoute(stops, { transportMode, provider, startPoint = null
     };
   }
 
-  if (provider === "google" && stops.length < 20 && !hasStartPoint) {
+  if (provider === "google" && stops.length < 20 && !hasStartPoint && !hasEndPoint) {
     const googleRoute = await fetchGoogleDirections(
       stops.map((stop, i) => ({
         sequence: i + 1,
@@ -257,6 +272,7 @@ async function optimizeRoute(stops, { transportMode, provider, startPoint = null
       provider,
       strategy,
       startPoint: null,
+      endPoint: null,
       orderedStops: googleRoute.orderedStops,
       estimated: googleRoute.estimated,
       geometry: googleRoute.geometry,
@@ -267,7 +283,7 @@ async function optimizeRoute(stops, { transportMode, provider, startPoint = null
   // Production note:
   // For large fleets, replace this with OR-Tools / GraphHopper VRP constraints.
   const nearestOrder = nearestNeighborOrderFromStart(stops, startLocation);
-  const orderIndexes = improveOrderWithTwoOpt(stops, nearestOrder, startLocation);
+  const orderIndexes = improveOrderWithTwoOpt(stops, nearestOrder, startLocation, endLocation);
   const orderedStops = orderIndexes.map((idx, i) => ({
     sequence: i + 1,
     rawAddress: stops[idx].rawAddress,
@@ -278,13 +294,18 @@ async function optimizeRoute(stops, { transportMode, provider, startPoint = null
   const coordinates = [
     ...(hasStartPoint ? [startLocation] : []),
     ...orderedStops.map((stop) => stop.location),
+    ...(hasEndPoint ? [endLocation] : []),
   ];
   const routeStats = await fetchOsrmRoute(coordinates, transportMode);
 
   return {
     provider,
-    strategy: hasStartPoint ? `${strategy}-from-start` : strategy,
+    strategy:
+      hasStartPoint || hasEndPoint
+        ? `${strategy}${hasStartPoint ? "-from-start" : ""}${hasEndPoint ? "-to-end" : ""}`
+        : strategy,
     startPoint: hasStartPoint ? startPoint : null,
+    endPoint: hasEndPoint ? endPoint : null,
     orderedStops,
     estimated: {
       totalDistanceKm: routeStats.distanceKm,
