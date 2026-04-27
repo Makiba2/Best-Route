@@ -36,6 +36,46 @@ function extractLatLngFromText(value) {
   return { lat, lng };
 }
 
+/**
+ * Google Maps URLs often include @lat,lng for the map camera (viewport), which can be
+ * far from the actual place pin. Prefer !3d…!4d… inside data= (true POI) when present.
+ */
+function extractPlaceCoordsFromGoogleMapsUrl(urlString) {
+  const decoded = decodeURIComponent(String(urlString || ""));
+
+  const dataPairs = [...decoded.matchAll(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/g)];
+  if (dataPairs.length) {
+    const last = dataPairs[dataPairs.length - 1];
+    const lat = Number(last[1]);
+    const lng = Number(last[2]);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      return { lat, lng, source: "place-data" };
+    }
+  }
+
+  try {
+    const u = new URL(urlString);
+    const ll = u.searchParams.get("ll");
+    if (ll) {
+      const fromLl = extractLatLngFromText(ll);
+      if (fromLl) return { ...fromLl, source: "ll" };
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  const qMatch = decoded.match(/[?&]q=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/i);
+  if (qMatch) {
+    const lat = Number(qMatch[1]);
+    const lng = Number(qMatch[2]);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      return { lat, lng, source: "q" };
+    }
+  }
+
+  return null;
+}
+
 function parseGoogleMapsLink(input) {
   const raw = String(input || "").trim();
   if (!/^https?:\/\//i.test(raw)) return null;
@@ -50,16 +90,35 @@ function parseGoogleMapsLink(input) {
   const host = parsedUrl.hostname.toLowerCase();
   if (!host.includes("google.") && !host.includes("goo.gl")) return null;
 
+  const fromPlaceData = extractPlaceCoordsFromGoogleMapsUrl(raw);
+  if (fromPlaceData) {
+    return {
+      lat: fromPlaceData.lat,
+      lng: fromPlaceData.lng,
+      standardizedAddress: `Google Maps place (${fromPlaceData.lat}, ${fromPlaceData.lng})`,
+    };
+  }
+
   const queryCandidates = [
     parsedUrl.searchParams.get("q"),
     parsedUrl.searchParams.get("query"),
     parsedUrl.searchParams.get("destination"),
-    decodeURIComponent(parsedUrl.pathname || "").split("/").find((part) => part.startsWith("@")),
   ].filter(Boolean);
 
   for (const candidate of queryCandidates) {
-    const fromAtPath = candidate.startsWith("@") ? candidate.slice(1) : candidate;
-    const latLng = extractLatLngFromText(fromAtPath);
+    const latLng = extractLatLngFromText(candidate);
+    if (latLng) {
+      return {
+        ...latLng,
+        standardizedAddress: `Google Maps pin (${latLng.lat}, ${latLng.lng})`,
+      };
+    }
+  }
+
+  const pathParts = decodeURIComponent(parsedUrl.pathname || "").split("/");
+  const atSegment = pathParts.find((part) => part.startsWith("@"));
+  if (atSegment) {
+    const latLng = extractLatLngFromText(atSegment.slice(1));
     if (latLng) {
       return {
         ...latLng,
@@ -73,7 +132,7 @@ function parseGoogleMapsLink(input) {
       parsedUrl.searchParams.get("q") ||
       parsedUrl.searchParams.get("query") ||
       parsedUrl.searchParams.get("destination") ||
-      null,
+      raw,
   };
 }
 
@@ -121,7 +180,11 @@ function buildGeocodeQueries(address) {
   const raw = normalizeAddressInput(address);
   const fromGoogleLink = parseGoogleMapsLink(raw);
   if (fromGoogleLink?.searchText) {
-    return buildGeocodeQueries(fromGoogleLink.searchText);
+    const st = String(fromGoogleLink.searchText).trim();
+    // Avoid infinite recursion when the only "search" is the URL itself (e.g. short link).
+    if (st && st !== raw) {
+      return buildGeocodeQueries(st);
+    }
   }
 
   const queries = [raw];
