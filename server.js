@@ -44,7 +44,13 @@ app.post("/api/optimize-route", async (req, res) => {
   try {
     const { transportMode = "driving", provider = "osm" } = req.body || {};
     const inputAddresses = normalizeInputAddresses(req.body || {});
-    const { startAddress = "", startLocation = null } = req.body || {};
+    const {
+      startAddress = "",
+      startLocation = null,
+      endAddress = "",
+      endLocation = null,
+      returnToStart = false,
+    } = req.body || {};
 
     if (!inputAddresses.length) {
       return res.status(400).json({ error: "No addresses provided." });
@@ -94,10 +100,45 @@ app.post("/api/optimize-route", async (req, res) => {
       }
     }
 
+    let normalizedEndPoint = null;
+    let unresolvedEnd = null;
+    if (
+      endLocation &&
+      Number.isFinite(Number(endLocation.lat)) &&
+      Number.isFinite(Number(endLocation.lng))
+    ) {
+      normalizedEndPoint = {
+        rawAddress: "Selected End Location",
+        standardizedAddress: "Selected End Location",
+        location: {
+          lat: Number(endLocation.lat),
+          lng: Number(endLocation.lng),
+        },
+      };
+    } else if (typeof endAddress === "string" && endAddress.trim()) {
+      const [geocodedEnd] = await geocodeAddresses([endAddress.trim()], provider);
+      if (!geocodedEnd?.location) {
+        unresolvedEnd = endAddress.trim();
+      } else {
+        normalizedEndPoint = geocodedEnd;
+      }
+    }
+
+    if (returnToStart && normalizedStartPoint?.location) {
+      normalizedEndPoint = {
+        rawAddress: "Return to Start",
+        standardizedAddress:
+          normalizedStartPoint.standardizedAddress || normalizedStartPoint.rawAddress,
+        location: normalizedStartPoint.location,
+      };
+      unresolvedEnd = null;
+    }
+
     const routePlan = await optimizeRoute(resolvedStops, {
       transportMode,
       provider,
       startPoint: normalizedStartPoint,
+      endPoint: normalizedEndPoint,
     });
 
     return res.json({
@@ -107,6 +148,7 @@ app.post("/api/optimize-route", async (req, res) => {
         stopsSkipped: unresolved.length,
         unresolved: unresolved.map((item) => item.rawAddress),
         unresolvedStart,
+        unresolvedEnd,
         strategy: routePlan.strategy,
         provider: routePlan.provider,
       },
