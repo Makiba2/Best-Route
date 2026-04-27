@@ -208,13 +208,15 @@ button {
   .mobile-menu-btn,
   .mobile-close-btn {
     display: inline-block;
-    position: absolute;
-    z-index: 1500;
+    position: fixed;
+    z-index: 5000;
     width: auto;
     margin: 0;
     padding: 10px 14px;
     font-size: 13px;
     border-radius: 999px;
+    box-shadow: 0 6px 20px rgba(15, 23, 42, 0.25);
+    touch-action: manipulation;
   }
 
   .mobile-menu-btn {
