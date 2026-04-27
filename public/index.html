@@ -20,8 +20,8 @@
 
         <label>Provider</label>
         <select id="provider">
+          <option value="google" selected>Google Maps APIs</option>
           <option value="osm">OpenStreetMap (Nominatim + OSRM)</option>
-          <option value="google">Google Maps APIs</option>
         </select>
 
         <label>Transport Mode</label>
@@ -33,7 +33,6 @@
         <label>Starting Point (Optional)</label>
         <div class="start-point">
           <button id="useGpsBtn" type="button">Use My GPS Location</button>
-          <button id="followGpsBtn" type="button">Start Live Follow</button>
           <div id="gpsStatus"></div>
           <div id="followStatus"></div>
           <div id="nextStopHint"></div>
@@ -44,18 +43,10 @@
           />
         </div>
 
-        <label>End Point (Optional)</label>
-        <div class="start-point">
-          <input
-            id="endAddress"
-            type="text"
-            placeholder="Type where route should finish (e.g. Office, Accra)"
-          />
-          <label class="checkbox-row">
-            <input id="returnToStart" type="checkbox" />
-            Return to start point
-          </label>
-        </div>
+        <label class="checkbox-row">
+          <input id="returnToStart" type="checkbox" />
+          Return to start point
+        </label>
 
         <label>Manual Addresses (one per line)</label>
         <textarea id="pastedText" rows="8" placeholder="Enter addresses..."></textarea>
@@ -71,7 +62,15 @@
         </div>
 
         <h2>Optimized Stops</h2>
+        <input
+          id="stopSearch"
+          type="text"
+          placeholder="Search stop name/address..."
+        />
+        <button id="undoDoneBtn" type="button" class="secondary-btn">Undo Last Done</button>
         <ol id="stopsList"></ol>
+        <h3>Completed Stops</h3>
+        <ol id="completedStopsList"></ol>
         <div id="totals"></div>
       </aside>
 
