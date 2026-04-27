@@ -62,6 +62,14 @@ input[type="text"] {
   gap: 8px;
 }
 
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+}
+
 #useGpsBtn {
   margin-top: 0;
 }

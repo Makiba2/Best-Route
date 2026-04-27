@@ -13,6 +13,8 @@ const followGpsBtn = document.getElementById("followGpsBtn");
 const providerEl = document.getElementById("provider");
 const transportModeEl = document.getElementById("transportMode");
 const startAddressEl = document.getElementById("startAddress");
+const endAddressEl = document.getElementById("endAddress");
+const returnToStartEl = document.getElementById("returnToStart");
 const pastedTextEl = document.getElementById("pastedText");
 const csvFileEl = document.getElementById("csvFile");
 const gpsStatusEl = document.getElementById("gpsStatus");
@@ -30,7 +32,13 @@ let selectedGpsStart = null;
 let liveLocationMarker = null;
 let liveWatchId = null;
 let currentRouteStops = [];
+let lastRerouteLocation = null;
+let lastRerouteAt = 0;
+let liveRerouteInFlight = false;
 const mobileMediaQuery = window.matchMedia("(max-width: 900px)");
+const LIVE_REROUTE_MIN_MOVEMENT_M = 45;
+const LIVE_REROUTE_MIN_INTERVAL_MS = 5000;
+const STOP_REACHED_RADIUS_M = 45;
 
 function setStatus(message, isError = false) {
   statusEl.textContent = message;
@@ -178,6 +186,15 @@ function createStartIcon() {
   });
 }
 
+function createEndIcon() {
+  return L.divIcon({
+    className: "end-stop-wrapper",
+    html: '<div class="start-stop-icon">E</div>',
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+  });
+}
+
 function createLiveIcon() {
   return L.divIcon({
     className: "live-stop-wrapper",
@@ -213,6 +230,88 @@ function findNearestStop(currentLocation, stops) {
   }
 
   return bestStop;
+}
+
+function distanceMeters(a, b) {
+  const toRad = (value) => (value * Math.PI) / 180;
+  const earthRadiusM = 6371000;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const sinLat = Math.sin(dLat / 2);
+  const sinLng = Math.sin(dLng / 2);
+  const h =
+    sinLat * sinLat + Math.cos(lat1) * Math.cos(lat2) * sinLng * sinLng;
+  return 2 * earthRadiusM * Math.asin(Math.sqrt(h));
+}
+
+function maybeMarkArrivedStop(currentLocation) {
+  if (!currentRouteStops.length) return;
+  const nearestStop = findNearestStop(currentLocation, currentRouteStops);
+  if (!nearestStop?.location) return;
+
+  const meters = distanceMeters(currentLocation, nearestStop.location);
+  if (meters > STOP_REACHED_RADIUS_M) return;
+
+  currentRouteStops = currentRouteStops
+    .filter((stop) => stop.sequence !== nearestStop.sequence)
+    .map((stop, index) => ({
+      ...stop,
+      sequence: index + 1,
+    }));
+  renderStopList(currentRouteStops);
+}
+
+async function maybeLiveReroute(currentLocation) {
+  if (!currentRouteStops.length || liveRerouteInFlight) return;
+
+  const now = Date.now();
+  const movedMeters = lastRerouteLocation
+    ? distanceMeters(lastRerouteLocation, currentLocation)
+    : Number.POSITIVE_INFINITY;
+  const enoughTimePassed = now - lastRerouteAt >= LIVE_REROUTE_MIN_INTERVAL_MS;
+  const enoughMovement = movedMeters >= LIVE_REROUTE_MIN_MOVEMENT_M;
+  if (!enoughTimePassed || !enoughMovement) return;
+
+  liveRerouteInFlight = true;
+  lastRerouteAt = now;
+  lastRerouteLocation = currentLocation;
+
+  try {
+    const endAddress = endAddressEl.value.trim();
+    const returnToStart = Boolean(returnToStartEl.checked);
+    const payload = {
+      provider: providerEl.value,
+      transportMode: transportModeEl.value,
+      pastedText: currentRouteStops
+        .map((stop) => stop.standardizedAddress || stop.rawAddress)
+        .join("\n"),
+      csvText: "",
+      startAddress: "",
+      startLocation: currentLocation,
+      endAddress,
+      returnToStart,
+    };
+
+    const response = await fetch("/api/optimize-route", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (!response.ok) return;
+
+    currentRouteStops = data.route.orderedStops || [];
+    renderStopList(currentRouteStops);
+    drawRoute(data.route);
+    totalsEl.textContent = `Distance: ${data.route.estimated.totalDistanceKm} km | Duration: ${data.route.estimated.totalDurationMin} mins`;
+    setFollowStatus("Live follow rerouted from current location.");
+  } catch (error) {
+    setFollowStatus("Live reroute paused (network/API issue).", true);
+  } finally {
+    liveRerouteInFlight = false;
+  }
 }
 
 useGpsBtn.addEventListener("click", async () => {
@@ -266,6 +365,8 @@ followGpsBtn.addEventListener("click", () => {
     followGpsBtn.textContent = "Start Live Follow";
     setFollowStatus("Live follow stopped.");
     nextStopHintEl.textContent = "";
+    lastRerouteLocation = null;
+    lastRerouteAt = 0;
     if (liveLocationMarker) {
       liveLocationMarker.remove();
       liveLocationMarker = null;
@@ -276,11 +377,13 @@ followGpsBtn.addEventListener("click", () => {
   followGpsBtn.textContent = "Stop Live Follow";
   setFollowStatus("Following your movement...");
   liveWatchId = navigator.geolocation.watchPosition(
-    (position) => {
+    async (position) => {
       const current = {
         lat: position.coords.latitude,
         lng: position.coords.longitude,
       };
+
+      maybeMarkArrivedStop(current);
 
       if (!liveLocationMarker) {
         liveLocationMarker = L.marker([current.lat, current.lng], {
@@ -298,6 +401,8 @@ followGpsBtn.addEventListener("click", () => {
       } else {
         nextStopHintEl.textContent = "Optimize a route to see your next stop.";
       }
+
+      await maybeLiveReroute(current);
     },
     (error) => {
       setFollowStatus(`Live follow error (${error.message}).`, true);
@@ -315,7 +420,8 @@ function drawRoute(routeData) {
 
   const stops = routeData.orderedStops || [];
   const startPoint = routeData.startPoint || null;
-  if (!stops.length && !startPoint) return;
+  const endPoint = routeData.endPoint || null;
+  if (!stops.length && !startPoint && !endPoint) return;
 
   if (startPoint?.location) {
     const startMarker = L.marker([startPoint.location.lat, startPoint.location.lng], {
@@ -323,6 +429,16 @@ function drawRoute(routeData) {
     }).addTo(map);
     startMarker.bindPopup(`<strong>Start Point</strong><br>${startPoint.standardizedAddress || startPoint.rawAddress || "Selected start location"}`);
     markers.push(startMarker);
+  }
+
+  if (endPoint?.location) {
+    const endMarker = L.marker([endPoint.location.lat, endPoint.location.lng], {
+      icon: createEndIcon(),
+    }).addTo(map);
+    endMarker.bindPopup(
+      `<strong>End Point</strong><br>${endPoint.standardizedAddress || endPoint.rawAddress || "Selected end location"}`,
+    );
+    markers.push(endMarker);
   }
 
   stops.forEach((stop) => {
@@ -367,6 +483,8 @@ optimizeBtn.addEventListener("click", async () => {
     const csvText = await readCsvFile(csvFileEl.files?.[0]);
     const startAddress = startAddressEl.value.trim();
     const startLocation = selectedGpsStart && !startAddress ? selectedGpsStart : null;
+    const endAddress = endAddressEl.value.trim();
+    const returnToStart = Boolean(returnToStartEl.checked);
 
     const payload = {
       provider: providerEl.value,
@@ -375,6 +493,8 @@ optimizeBtn.addEventListener("click", async () => {
       csvText,
       startAddress,
       startLocation,
+      endAddress,
+      returnToStart,
     };
 
     const response = await fetch("/api/optimize-route", {
@@ -388,6 +508,7 @@ optimizeBtn.addEventListener("click", async () => {
       const unresolved = [
         ...(Array.isArray(data.unresolved) ? data.unresolved : []),
         ...(data.unresolvedStart ? [data.unresolvedStart] : []),
+        ...(data.unresolvedEnd ? [data.unresolvedEnd] : []),
       ];
       renderUnresolved(unresolved);
       setStatus(data.error || "Failed to optimize route.", true);
@@ -401,15 +522,16 @@ optimizeBtn.addEventListener("click", async () => {
 
     const skippedStops = Array.isArray(data.meta?.unresolved) ? data.meta.unresolved : [];
     const skippedStart = data.meta?.unresolvedStart ? [data.meta.unresolvedStart] : [];
-    renderUnresolved([...skippedStops, ...skippedStart]);
+    const skippedEnd = data.meta?.unresolvedEnd ? [data.meta.unresolvedEnd] : [];
+    renderUnresolved([...skippedStops, ...skippedStart, ...skippedEnd]);
 
     currentRouteStops = data.route.orderedStops || [];
     renderStopList(data.route.orderedStops);
     drawRoute(data.route);
     totalsEl.textContent = `Distance: ${data.route.estimated.totalDistanceKm} km | Duration: ${data.route.estimated.totalDurationMin} mins`;
-    if (skippedStops.length || skippedStart.length) {
+    if (skippedStops.length || skippedStart.length || skippedEnd.length) {
       setStatus(
-        `Route ready. Skipped ${skippedStops.length + skippedStart.length} location(s) not found.`,
+        `Route ready. Skipped ${skippedStops.length + skippedStart.length + skippedEnd.length} location(s) not found.`,
       );
     } else {
       setStatus(`Success. Strategy: ${data.meta.strategy}`);
