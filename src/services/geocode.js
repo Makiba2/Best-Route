@@ -77,6 +77,33 @@ function parseGoogleMapsLink(input) {
   };
 }
 
+async function expandGoogleMapsShortUrl(input) {
+  const raw = String(input || "").trim();
+  if (!/^https?:\/\//i.test(raw)) return raw;
+
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(raw);
+  } catch (error) {
+    return raw;
+  }
+
+  if (!parsedUrl.hostname.toLowerCase().includes("maps.app.goo.gl")) {
+    return raw;
+  }
+
+  try {
+    const response = await axios.get(raw, {
+      maxRedirects: 10,
+      timeout: 10000,
+      validateStatus: (status) => status >= 200 && status < 400,
+    });
+    return response.request?.res?.responseUrl || raw;
+  } catch (error) {
+    return raw;
+  }
+}
+
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -105,6 +132,11 @@ function buildGeocodeQueries(address) {
     queries.push(firstSegment);
   }
 
+  const plusCodeMatch = raw.match(/\b[A-Z0-9]{4,8}\+[A-Z0-9]{2,3}\b/i);
+  if (plusCodeMatch?.[0]) {
+    queries.push(plusCodeMatch[0].toUpperCase());
+  }
+
   if (defaultCountry && !new RegExp(`\\b${defaultCountry}\\b`, "i").test(raw)) {
     queries.push(`${raw}, ${defaultCountry}`);
   }
@@ -119,6 +151,10 @@ function buildGeocodeQueries(address) {
 
   if (defaultCountry && isLikelyPostalCode(raw)) {
     queries.push(`${raw}, ${defaultCountry}`);
+  }
+
+  if (defaultCountry && plusCodeMatch?.[0]) {
+    queries.push(`${plusCodeMatch[0].toUpperCase()}, Accra, ${defaultCountry}`);
   }
 
   return [...new Set(queries)].filter(Boolean);
@@ -186,7 +222,7 @@ async function geocodeWithGoogle(address) {
   const queries = buildGeocodeQueries(address);
 
   for (const query of queries) {
-    const response = await googleClient.geocode({
+    const strictResponse = await googleClient.geocode({
       params: {
         address: query,
         key: apiKey,
@@ -195,13 +231,30 @@ async function geocodeWithGoogle(address) {
       },
     });
 
-    const first = response.data.results?.[0];
-    if (!first) continue;
+    const strictMatch = strictResponse.data.results?.[0];
+    if (strictMatch) {
+      return {
+        lat: strictMatch.geometry.location.lat,
+        lng: strictMatch.geometry.location.lng,
+        standardizedAddress: strictMatch.formatted_address,
+      };
+    }
+
+    // Relax country constraints if strict pass returns nothing.
+    const relaxedResponse = await googleClient.geocode({
+      params: {
+        address: query,
+        key: apiKey,
+      },
+    });
+
+    const relaxedMatch = relaxedResponse.data.results?.[0];
+    if (!relaxedMatch) continue;
 
     return {
-      lat: first.geometry.location.lat,
-      lng: first.geometry.location.lng,
-      standardizedAddress: first.formatted_address,
+      lat: relaxedMatch.geometry.location.lat,
+      lng: relaxedMatch.geometry.location.lng,
+      standardizedAddress: relaxedMatch.formatted_address,
     };
   }
 
@@ -215,7 +268,8 @@ async function geocodeAddresses(addresses, provider = "osm") {
   for (const address of addresses) {
     let location = null;
 
-    const googleLink = parseGoogleMapsLink(address);
+    const expandedAddress = await expandGoogleMapsShortUrl(address);
+    const googleLink = parseGoogleMapsLink(expandedAddress);
     if (googleLink?.lat !== undefined && googleLink?.lng !== undefined) {
       results.push({
         rawAddress: address,
@@ -228,17 +282,17 @@ async function geocodeAddresses(addresses, provider = "osm") {
     try {
       if (normalizedProvider === "google") {
         // Prefer Google when selected, but fall back to OSM if Google misses/rejects.
-        location = await geocodeWithGoogle(address);
+        location = await geocodeWithGoogle(expandedAddress);
         if (!location) {
-          location = await geocodeWithOsm(address);
+          location = await geocodeWithOsm(expandedAddress);
         }
       } else {
-        location = await geocodeWithOsm(address);
+        location = await geocodeWithOsm(expandedAddress);
       }
     } catch (error) {
       if (normalizedProvider === "google") {
         try {
-          location = await geocodeWithOsm(address);
+          location = await geocodeWithOsm(expandedAddress);
         } catch (fallbackError) {
           location = null;
         }
