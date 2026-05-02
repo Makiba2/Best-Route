@@ -36,11 +36,20 @@
           <div id="gpsStatus"></div>
           <div id="followStatus"></div>
           <div id="nextStopHint"></div>
-          <input
-            id="startAddress"
-            type="text"
-            placeholder="Or type a starting location (e.g. East Legon, Accra)"
-          />
+          <div class="autocomplete-field">
+            <input
+              id="startAddress"
+              type="text"
+              placeholder="Or type a starting location (e.g. East Legon, Accra)"
+              autocomplete="off"
+            />
+            <div
+              id="startAddressSuggestions"
+              class="address-suggestions hidden"
+              role="listbox"
+              aria-label="Address suggestions"
+            ></div>
+          </div>
         </div>
 
         <label class="checkbox-row">
@@ -49,7 +58,21 @@
         </label>
 
         <label>Manual Addresses (one per line)</label>
-        <textarea id="pastedText" rows="8" placeholder="Enter addresses..."></textarea>
+        <div class="manual-address-field">
+          <textarea
+            id="pastedText"
+            rows="8"
+            placeholder="Enter addresses..."
+            autocomplete="off"
+            spellcheck="false"
+          ></textarea>
+          <div
+            id="addressSuggestions"
+            class="address-suggestions hidden"
+            role="listbox"
+            aria-label="Address suggestions"
+          ></div>
+        </div>
 
         <label>Or Upload CSV</label>
         <input id="csvFile" type="file" accept=".csv" />

@@ -57,6 +57,56 @@ input[type="text"] {
   border: 1px solid #c7d0da;
 }
 
+.manual-address-field,
+.autocomplete-field {
+  position: relative;
+}
+
+.address-suggestions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  max-height: 220px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #c7d0da;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  z-index: 3000;
+}
+
+.address-suggestion-item {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 1px solid #eef2f6;
+  background: #fff;
+  text-align: left;
+  font-size: 13px;
+  line-height: 1.35;
+  color: #1e293b;
+  cursor: pointer;
+  border-radius: 0;
+  font-weight: 400;
+}
+
+.address-suggestion-item:last-child {
+  border-bottom: 0;
+}
+
+.address-suggestion-item:hover,
+.address-suggestion-item.is-active {
+  background: #eff6ff;
+}
+
+.address-suggestion-item:focus {
+  outline: 2px solid #1b6ef3;
+  outline-offset: -2px;
+}
+
 .start-point {
   display: grid;
   gap: 8px;

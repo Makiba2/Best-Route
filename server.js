@@ -6,6 +6,9 @@ const cors = require("cors");
 const { parse } = require("csv-parse/sync");
 const { geocodeAddresses } = require("./src/services/geocode");
 const { optimizeRoute } = require("./src/services/optimize");
+const {
+  fetchPlaceAutocompleteSuggestions,
+} = require("./src/services/placesAutocomplete");
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
@@ -17,6 +20,36 @@ app.use(express.static(publicDir));
 
 app.get("/", (req, res) => {
   return res.sendFile(path.join(publicDir, "index.html"));
+});
+
+app.get("/api/config", (req, res) => {
+  const hasGoogleKey = Boolean(String(process.env.GOOGLE_MAPS_API_KEY || "").trim());
+  return res.json({
+    googlePlacesAutocomplete: hasGoogleKey,
+  });
+});
+
+app.post("/api/places-autocomplete", async (req, res) => {
+  try {
+    const { input = "", sessionToken = "" } = req.body || {};
+    const text = String(input || "").trim();
+    if (text.length < 2) {
+      return res.json({ suggestions: [] });
+    }
+    if (text.length > 280) {
+      return res.status(400).json({ error: "Input too long." });
+    }
+
+    const suggestions = await fetchPlaceAutocompleteSuggestions(text, sessionToken);
+    return res.json({ suggestions });
+  } catch (error) {
+    if (error.code === "NO_KEY") {
+      return res.status(503).json({ error: "Places Autocomplete is not configured." });
+    }
+    return res.status(500).json({
+      error: error.message || "Autocomplete request failed.",
+    });
+  }
 });
 
 function normalizeInputAddresses({ addresses, pastedText, csvText }) {
