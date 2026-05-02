@@ -28,6 +28,7 @@ const undoDoneBtn = document.getElementById("undoDoneBtn");
 const stopsListEl = document.getElementById("stopsList");
 const completedStopsListEl = document.getElementById("completedStopsList");
 const totalsEl = document.getElementById("totals");
+const clearAllBtn = document.getElementById("clearAllBtn");
 
 let markers = [];
 let routeLayer = null;
@@ -164,6 +165,51 @@ function clearMap() {
     liveLocationMarker = null;
   }
 }
+
+function clearEverything() {
+  pastedTextEl.value = "";
+  csvFileEl.value = "";
+  startAddressEl.value = "";
+  returnToStartEl.checked = false;
+  stopSearchEl.value = "";
+
+  selectedGpsStart = null;
+  stopLiveFollow();
+  setGpsStatus("");
+  setFollowStatus("");
+  nextStopHintEl.textContent = "";
+
+  currentRouteStops = [];
+  completedRouteStops = [];
+  lastUndoSnapshot = null;
+  currentRouteStartPoint = null;
+  currentRouteEndPoint = null;
+
+  renderStopList(currentRouteStops);
+  renderCompletedStops();
+  renderUnresolved([]);
+  totalsEl.textContent = "";
+  setStatus("All cleared.");
+
+  clearMap();
+  clearRouteProgress();
+
+  hideSuggestionPanel(addressSuggestionsEl);
+  hideSuggestionPanel(startAddressSuggestionsEl);
+  manualAutocompleteSessionToken = null;
+  startAutocompleteSessionToken = null;
+  manualSuggestRange = null;
+  clearTimeout(manualSuggestTimer);
+  clearTimeout(startSuggestTimer);
+
+  useGpsBtn.disabled = false;
+
+  map.setView([5.6037, -0.187], 11);
+}
+
+clearAllBtn.addEventListener("click", () => {
+  clearEverything();
+});
 
 function isMobileView() {
   return mobileMediaQuery.matches;

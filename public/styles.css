@@ -247,6 +247,10 @@ button {
   font-weight: 600;
 }
 
+.clear-all-btn {
+  margin-top: 16px;
+}
+
 .map-wrap {
   position: relative;
   padding: 10px;
