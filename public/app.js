@@ -5,6 +5,8 @@ L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
   attribution: "&copy; OpenStreetMap contributors",
 }).addTo(map);
 
+const layoutEl = document.getElementById("layout");
+const togglePanelBtn = document.getElementById("togglePanelBtn");
 const optimizeBtn = document.getElementById("optimizeBtn");
 const useGpsBtn = document.getElementById("useGpsBtn");
 const providerEl = document.getElementById("provider");
@@ -48,6 +50,7 @@ const LIVE_REROUTE_MIN_MOVEMENT_M = 45;
 const LIVE_REROUTE_MIN_INTERVAL_MS = 5000;
 const STOP_REACHED_RADIUS_M = 45;
 const ROUTE_PROGRESS_STORAGE_KEY = "best-route-progress-v1";
+const PANEL_COLLAPSED_STORAGE_KEY = "best-route-panel-collapsed";
 let lastMapInteractionAt = 0;
 
 let googlePlacesAutocompleteEnabled = false;
@@ -219,8 +222,10 @@ function routeFitPaddingOptions() {
     return { padding: [20, 20] };
   }
 
+  const topPad = isPanelCollapsed() ? 58 : 12;
+
   return {
-    paddingTopLeft: L.point(12, 12),
+    paddingTopLeft: L.point(12, topPad),
     paddingBottomRight: L.point(52, 48),
     maxZoom: 16,
   };
@@ -230,6 +235,49 @@ function scheduleMapResize() {
   window.setTimeout(() => map.invalidateSize(), 80);
   window.setTimeout(() => map.invalidateSize(), 320);
 }
+
+function isPanelCollapsed() {
+  return layoutEl?.classList.contains("panel-collapsed") ?? false;
+}
+
+function syncPanelToggleButton() {
+  if (!togglePanelBtn) return;
+  const collapsed = isPanelCollapsed();
+  togglePanelBtn.textContent = collapsed ? "Menu" : "Hide menu";
+  togglePanelBtn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+}
+
+function setPanelCollapsed(collapsed, persist = true) {
+  if (!layoutEl || !isMobileView()) return;
+  layoutEl.classList.toggle("panel-collapsed", collapsed);
+  syncPanelToggleButton();
+  if (persist) {
+    try {
+      sessionStorage.setItem(PANEL_COLLAPSED_STORAGE_KEY, collapsed ? "1" : "0");
+    } catch (error) {
+      // ignore
+    }
+  }
+  scheduleMapResize();
+}
+
+function restorePanelCollapsedState() {
+  if (!isMobileView()) {
+    layoutEl?.classList.remove("panel-collapsed");
+    syncPanelToggleButton();
+    return;
+  }
+  try {
+    const stored = sessionStorage.getItem(PANEL_COLLAPSED_STORAGE_KEY);
+    setPanelCollapsed(stored === "1", false);
+  } catch (error) {
+    syncPanelToggleButton();
+  }
+}
+
+togglePanelBtn?.addEventListener("click", () => {
+  setPanelCollapsed(!isPanelCollapsed());
+});
 
 function renderUnresolved(unresolved = []) {
   unresolvedListEl.innerHTML = "";
@@ -248,7 +296,10 @@ function renderUnresolved(unresolved = []) {
   unresolvedWrapEl.classList.remove("hidden");
 }
 
-mobileMediaQuery.addEventListener("change", scheduleMapResize);
+mobileMediaQuery.addEventListener("change", () => {
+  restorePanelCollapsedState();
+  scheduleMapResize();
+});
 window.addEventListener("resize", scheduleMapResize);
 if (window.visualViewport) {
   window.visualViewport.addEventListener("resize", scheduleMapResize);
@@ -1088,6 +1139,7 @@ optimizeBtn.addEventListener("click", async () => {
 
 (async function initApp() {
   await refreshClientConfig();
+  restorePanelCollapsedState();
   restoreRouteProgress();
   scheduleMapResize();
 })();

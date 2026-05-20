@@ -258,6 +258,10 @@ button {
   border-radius: 10px;
 }
 
+.panel-toggle-btn {
+  display: none;
+}
+
 @media (max-width: 900px) {
   .layout {
     display: flex;
@@ -281,6 +285,41 @@ button {
     box-shadow: none;
     transform: none;
     -webkit-overflow-scrolling: touch;
+    overflow-y: auto;
+    transition:
+      max-height 0.28s ease,
+      min-height 0.28s ease,
+      opacity 0.22s ease,
+      border-width 0.28s ease;
+  }
+
+  .layout.panel-collapsed .sidebar {
+    max-height: 0;
+    min-height: 0;
+    opacity: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    border-bottom-width: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .panel-toggle-btn {
+    display: inline-block;
+    position: absolute;
+    z-index: 20000;
+    top: calc(10px + env(safe-area-inset-top));
+    left: calc(10px + env(safe-area-inset-left));
+    width: auto;
+    margin: 0;
+    padding: 10px 14px;
+    font-size: 13px;
+    border-radius: 999px;
+    background: #0f172a;
+    color: #fff;
+    box-shadow: 0 6px 20px rgba(15, 23, 42, 0.25);
+    touch-action: manipulation;
+    pointer-events: auto;
   }
 
   .sidebar h1 {

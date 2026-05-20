@@ -16,7 +16,7 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <div class="layout">
+    <div class="layout" id="layout">
       <aside class="sidebar" id="sidebar">
         <h1>Delivery Routing System</h1>
         <p>Optimize 1 to 100+ stops using Google or OSM.</p>
@@ -104,6 +104,15 @@
       </aside>
 
       <main class="map-wrap">
+        <button
+          id="togglePanelBtn"
+          type="button"
+          class="panel-toggle-btn"
+          aria-expanded="true"
+          aria-controls="sidebar"
+        >
+          Hide menu
+        </button>
         <div id="map"></div>
       </main>
     </div>
