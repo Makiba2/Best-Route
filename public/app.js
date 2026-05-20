@@ -216,19 +216,16 @@ function isMobileView() {
   return mobileMediaQuery.matches;
 }
 
-/** Keeps markers/routes readable under floating UI on small screens after fitBounds */
-function routeFitPaddingOptions() {
-  if (!isMobileView()) {
-    return { padding: [20, 20] };
+/** On mobile, only pan — never auto-zoom so the menu panel stays easy to use */
+function focusMapOnRoute(bounds) {
+  if (!bounds?.isValid?.()) return;
+
+  if (isMobileView()) {
+    map.panTo(bounds.getCenter(), { animate: false });
+    return;
   }
 
-  const topPad = isPanelCollapsed() ? 58 : 12;
-
-  return {
-    paddingTopLeft: L.point(12, topPad),
-    paddingBottomRight: L.point(52, 48),
-    maxZoom: 16,
-  };
+  map.fitBounds(bounds, { padding: [20, 20], maxZoom: 14 });
 }
 
 function scheduleMapResize() {
@@ -928,16 +925,15 @@ function drawRoute(routeData) {
     lineCoords = decodePolyline(routeData.directionsOverviewPolyline);
   }
 
-  const fitOpts = routeFitPaddingOptions();
-
+  let routeBounds = null;
   if (lineCoords?.length) {
     routeLayer = L.polyline(lineCoords, { color: "#0a63ff", weight: 4 }).addTo(map);
-    map.fitBounds(routeLayer.getBounds(), fitOpts);
+    routeBounds = routeLayer.getBounds();
   } else if (markers.length) {
-    const group = L.featureGroup(markers);
-    map.fitBounds(group.getBounds(), fitOpts);
+    routeBounds = L.featureGroup(markers).getBounds();
   }
 
+  focusMapOnRoute(routeBounds);
   scheduleMapResize();
 }
 

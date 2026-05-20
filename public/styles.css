@@ -286,6 +286,7 @@ button {
     transform: none;
     -webkit-overflow-scrolling: touch;
     overflow-y: auto;
+    touch-action: pan-y;
     transition:
       max-height 0.28s ease,
       min-height 0.28s ease,
