@@ -1,4 +1,5 @@
-const map = L.map("map").setView([5.6037, -0.187], 11);
+const map = L.map("map", { zoomControl: false }).setView([5.6037, -0.187], 11);
+L.control.zoom({ position: "bottomright" }).addTo(map);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
   maxZoom: 19,
   attribution: "&copy; OpenStreetMap contributors",
@@ -213,6 +214,19 @@ clearAllBtn.addEventListener("click", () => {
 
 function isMobileView() {
   return mobileMediaQuery.matches;
+}
+
+/** Keeps markers/routes readable under floating UI on small screens after fitBounds */
+function routeFitPaddingOptions() {
+  if (!isMobileView()) {
+    return { padding: [20, 20] };
+  }
+
+  return {
+    paddingTopLeft: L.point(18, 84),
+    paddingBottomRight: L.point(72, 138),
+    maxZoom: 16,
+  };
 }
 
 function syncMobileNavButtons() {
@@ -895,12 +909,14 @@ function drawRoute(routeData) {
     lineCoords = decodePolyline(routeData.directionsOverviewPolyline);
   }
 
+  const fitOpts = routeFitPaddingOptions();
+
   if (lineCoords?.length) {
     routeLayer = L.polyline(lineCoords, { color: "#0a63ff", weight: 4 }).addTo(map);
-    map.fitBounds(routeLayer.getBounds(), { padding: [20, 20] });
+    map.fitBounds(routeLayer.getBounds(), fitOpts);
   } else if (markers.length) {
     const group = L.featureGroup(markers);
-    map.fitBounds(group.getBounds(), { padding: [20, 20] });
+    map.fitBounds(group.getBounds(), fitOpts);
   }
 }
 
