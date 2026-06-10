@@ -29,6 +29,9 @@ const stopsListEl = document.getElementById("stopsList");
 const completedStopsListEl = document.getElementById("completedStopsList");
 const totalsEl = document.getElementById("totals");
 const clearAllBtn = document.getElementById("clearAllBtn");
+const shareLinkBtn = document.getElementById("shareLinkBtn");
+const shareHintEl = document.getElementById("shareHint");
+const mobileShareBtn = document.getElementById("mobileShareBtn");
 
 let markers = [];
 let routeLayer = null;
@@ -51,6 +54,13 @@ const LIVE_REROUTE_MIN_INTERVAL_MS = 5000;
 const STOP_REACHED_RADIUS_M = 45;
 const ROUTE_PROGRESS_STORAGE_KEY = "best-route-progress-v1";
 const PANEL_COLLAPSED_STORAGE_KEY = "best-route-panel-collapsed";
+const SHARE_HASH_PREFIX = "r=";
+const MAX_SHARE_URL_LENGTH = 8000;
+let lastRouteMeta = null;
+let lastRouteEstimated = null;
+let lastRouteGeometry = null;
+let lastRoutePolyline = null;
+let shareHintTimer = null;
 let lastMapInteractionAt = 0;
 
 let googlePlacesAutocompleteEnabled = false;
@@ -68,6 +78,307 @@ map.on("zoomstart", () => {
 map.on("dragstart", () => {
   lastMapInteractionAt = Date.now();
 });
+
+function encodeSharePayload(payload) {
+  const json = JSON.stringify(payload);
+  const bytes = new TextEncoder().encode(json);
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function decodeSharePayload(encoded) {
+  try {
+    let base64 = String(encoded || "").replace(/-/g, "+").replace(/_/g, "/");
+    while (base64.length % 4) base64 += "=";
+    const binary = atob(base64);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch (error) {
+    return null;
+  }
+}
+
+function getSharePayloadFromUrl() {
+  const hash = String(window.location.hash || "").replace(/^#/, "");
+  if (!hash.startsWith(SHARE_HASH_PREFIX)) return null;
+  return decodeSharePayload(hash.slice(SHARE_HASH_PREFIX.length));
+}
+
+function buildSharePayload() {
+  const payload = {
+    v: 1,
+    provider: providerEl.value,
+    transportMode: transportModeEl.value,
+    returnToStart: Boolean(returnToStartEl.checked),
+    startAddress: startAddressEl.value.trim(),
+  };
+
+  if (selectedGpsStart && !payload.startAddress) {
+    payload.startLat = selectedGpsStart.lat;
+    payload.startLng = selectedGpsStart.lng;
+  }
+
+  if (currentRouteStops.length) {
+    payload.kind = "route";
+    payload.stops = currentRouteStops.map((stop) => ({
+      sequence: stop.sequence,
+      rawAddress: stop.rawAddress,
+      standardizedAddress: stop.standardizedAddress,
+      location: stop.location,
+    }));
+    payload.startPoint = currentRouteStartPoint;
+    payload.endPoint = currentRouteEndPoint;
+    payload.estimated = lastRouteEstimated;
+    payload.meta = lastRouteMeta;
+    payload.geometry = lastRouteGeometry;
+    payload.directionsOverviewPolyline = lastRoutePolyline;
+    return payload;
+  }
+
+  const stopsText = pastedTextEl.value.trim();
+  if (!stopsText) return null;
+
+  payload.kind = "input";
+  payload.stopsText = pastedTextEl.value;
+  return payload;
+}
+
+function buildShareUrl() {
+  const payload = buildSharePayload();
+  if (!payload) return null;
+
+  const encoded = encodeSharePayload(payload);
+  const url = new URL(window.location.href);
+  url.search = "";
+  url.hash = `${SHARE_HASH_PREFIX}${encoded}`;
+  return url.toString();
+}
+
+function updateShareUrlInBrowser() {
+  const shareUrl = buildShareUrl();
+  if (!shareUrl) return;
+  try {
+    history.replaceState(null, "", shareUrl);
+  } catch (error) {
+    // Ignore history failures (older browsers / file://).
+  }
+}
+
+function clearShareUrlInBrowser() {
+  try {
+    const url = new URL(window.location.href);
+    url.hash = "";
+    history.replaceState(null, "", `${url.pathname}${url.search}`);
+  } catch (error) {
+    // Ignore history failures.
+  }
+}
+
+function canShareRoute() {
+  return Boolean(currentRouteStops.length || pastedTextEl.value.trim());
+}
+
+function canUseNativeShare() {
+  return typeof navigator.share === "function";
+}
+
+function getShareStopCount() {
+  if (currentRouteStops.length) return currentRouteStops.length;
+  return pastedTextEl.value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean).length;
+}
+
+function syncShareButtonLabels() {
+  const useNative = canUseNativeShare() && isMobileView();
+  const label = useNative ? "Share route" : "Copy share link";
+  if (shareLinkBtn) shareLinkBtn.textContent = label;
+  if (mobileShareBtn) mobileShareBtn.textContent = label;
+}
+
+function updateShareButtonState() {
+  const canShare = canShareRoute();
+  if (shareLinkBtn) shareLinkBtn.disabled = !canShare;
+  if (mobileShareBtn) {
+    mobileShareBtn.disabled = !canShare;
+    mobileShareBtn.classList.toggle("hidden", !canShare || !isMobileView());
+  }
+  syncShareButtonLabels();
+}
+
+function focusMapAfterShareLoad() {
+  if (!isMobileView()) return;
+  setPanelCollapsed(true);
+  scheduleMapResize();
+}
+
+function hideShareHint() {
+  if (!shareHintEl) return;
+  shareHintEl.classList.add("hidden");
+}
+
+function showShareHint(message) {
+  if (!shareHintEl) return;
+  shareHintEl.textContent = message;
+  shareHintEl.classList.remove("hidden");
+  clearTimeout(shareHintTimer);
+  shareHintTimer = window.setTimeout(hideShareHint, 5000);
+}
+
+async function shareRouteLink() {
+  const shareUrl = buildShareUrl();
+  if (!shareUrl) {
+    setStatus("Add at least one address before sharing.", true);
+    return;
+  }
+
+  if (shareUrl.length > MAX_SHARE_URL_LENGTH) {
+    setStatus(
+      "This route is too large to share as a link. Remove some stops or split into smaller routes.",
+      true,
+    );
+    return;
+  }
+
+  const stopCount = getShareStopCount();
+  const shareTitle = "Delivery route";
+  const shareText =
+    stopCount > 0
+      ? `Delivery route with ${stopCount} stop${stopCount === 1 ? "" : "s"}`
+      : "Delivery route";
+
+  if (canUseNativeShare() && isMobileView()) {
+    try {
+      await navigator.share({ title: shareTitle, text: shareText, url: shareUrl });
+      showShareHint("Shared. Recipients can open the link to view the same route.");
+      setStatus("Route shared.");
+      return;
+    } catch (error) {
+      if (error?.name === "AbortError") return;
+    }
+  }
+
+  try {
+    await navigator.clipboard.writeText(shareUrl);
+    showShareHint("Link copied. Send it to your driver — opening it restores this route.");
+    setStatus("Share link copied to clipboard.");
+  } catch (error) {
+    window.prompt("Copy this share link:", shareUrl);
+    setStatus("Copy the link from the dialog box.");
+  }
+}
+
+function applySharedSettings(payload) {
+  if (payload.provider === "google" || payload.provider === "osm") {
+    providerEl.value = payload.provider;
+  }
+  if (payload.transportMode === "driving" || payload.transportMode === "walking") {
+    transportModeEl.value = payload.transportMode;
+  }
+  returnToStartEl.checked = Boolean(payload.returnToStart);
+
+  if (typeof payload.startAddress === "string" && payload.startAddress.trim()) {
+    startAddressEl.value = payload.startAddress.trim();
+    selectedGpsStart = null;
+    setGpsStatus("");
+  } else if (
+    Number.isFinite(Number(payload.startLat)) &&
+    Number.isFinite(Number(payload.startLng))
+  ) {
+    selectedGpsStart = {
+      lat: Number(payload.startLat),
+      lng: Number(payload.startLng),
+    };
+    startAddressEl.value = "";
+    setGpsStatus("Shared start location loaded.");
+  }
+}
+
+function applySharedRoute(payload) {
+  applySharedSettings(payload);
+
+  const stopsText = (payload.stops || [])
+    .map((stop) => stop.rawAddress || stop.standardizedAddress)
+    .filter(Boolean)
+    .join("\n");
+  pastedTextEl.value = stopsText;
+  csvFileEl.value = "";
+
+  currentRouteStops = assignStopIds(payload.stops || []).map((stop, index) => ({
+    ...stop,
+    sequence: index + 1,
+  }));
+  completedRouteStops = [];
+  lastUndoSnapshot = null;
+  currentRouteStartPoint = payload.startPoint || null;
+  currentRouteEndPoint = payload.endPoint || null;
+  lastRouteMeta = payload.meta || null;
+  lastRouteEstimated = payload.estimated || null;
+  lastRouteGeometry = payload.geometry || null;
+  lastRoutePolyline = payload.directionsOverviewPolyline || null;
+
+  renderStopList(currentRouteStops);
+  renderCompletedStops();
+  renderUnresolved([]);
+
+  const routeData = {
+    orderedStops: currentRouteStops,
+    startPoint: currentRouteStartPoint,
+    endPoint: currentRouteEndPoint,
+    geometry: lastRouteGeometry,
+    directionsOverviewPolyline: lastRoutePolyline,
+  };
+
+  drawRoute(routeData);
+
+  if (lastRouteEstimated) {
+    totalsEl.textContent = `Distance: ${lastRouteEstimated.totalDistanceKm} km | Duration: ${lastRouteEstimated.totalDurationMin} mins`;
+  } else {
+    totalsEl.textContent = "";
+  }
+
+  if (lastRouteMeta?.strategy) {
+    setStatus(`Shared route loaded. Strategy: ${lastRouteMeta.strategy}`);
+  } else {
+    setStatus("Shared route loaded.");
+  }
+
+  saveRouteProgress();
+  updateShareButtonState();
+  focusMapAfterShareLoad();
+}
+
+function applySharedInput(payload) {
+  applySharedSettings(payload);
+  pastedTextEl.value = typeof payload.stopsText === "string" ? payload.stopsText : "";
+  csvFileEl.value = "";
+  updateShareButtonState();
+}
+
+async function loadFromShareUrl() {
+  const payload = getSharePayloadFromUrl();
+  if (!payload || payload.v !== 1) return false;
+
+  if (payload.kind === "route" && Array.isArray(payload.stops) && payload.stops.length) {
+    applySharedRoute(payload);
+    focusMapAfterShareLoad();
+    return true;
+  }
+
+  if (payload.kind === "input" && typeof payload.stopsText === "string" && payload.stopsText.trim()) {
+    applySharedInput(payload);
+    setStatus("Shared route setup loaded. Optimizing...");
+    await runOptimize();
+    focusMapAfterShareLoad();
+    return true;
+  }
+
+  return false;
+}
 
 function setStatus(message, isError = false) {
   statusEl.textContent = message;
@@ -194,6 +505,9 @@ function clearEverything() {
 
   clearMap();
   clearRouteProgress();
+  clearShareUrlInBrowser();
+  hideShareHint();
+  updateShareButtonState();
 
   hideSuggestionPanel(addressSuggestionsEl);
   hideSuggestionPanel(startAddressSuggestionsEl);
@@ -295,6 +609,7 @@ function renderUnresolved(unresolved = []) {
 
 mobileMediaQuery.addEventListener("change", () => {
   restorePanelCollapsedState();
+  updateShareButtonState();
   scheduleMapResize();
 });
 window.addEventListener("resize", scheduleMapResize);
@@ -484,6 +799,7 @@ async function flushStartAddressSuggest() {
 }
 
 pastedTextEl.addEventListener("input", () => {
+  updateShareButtonState();
   clearTimeout(manualSuggestTimer);
   manualSuggestTimer = setTimeout(flushManualAddressSuggest, 300);
 });
@@ -1054,7 +1370,15 @@ stopsListEl.addEventListener("click", async (event) => {
   }
 });
 
-optimizeBtn.addEventListener("click", async () => {
+shareLinkBtn?.addEventListener("click", () => {
+  shareRouteLink();
+});
+
+mobileShareBtn?.addEventListener("click", () => {
+  shareRouteLink();
+});
+
+async function runOptimize() {
   try {
     setStatus("Optimizing route...");
     optimizeBtn.disabled = true;
@@ -1097,10 +1421,15 @@ optimizeBtn.addEventListener("click", async () => {
       currentRouteStops = [];
       completedRouteStops = [];
       lastUndoSnapshot = null;
+      lastRouteMeta = null;
+      lastRouteEstimated = null;
+      lastRouteGeometry = null;
+      lastRoutePolyline = null;
       nextStopHintEl.textContent = "";
       clearMap();
       clearRouteProgress();
-      return;
+      updateShareButtonState();
+      return false;
     }
 
     const skippedStops = Array.isArray(data.meta?.unresolved) ? data.meta.unresolved : [];
@@ -1113,6 +1442,10 @@ optimizeBtn.addEventListener("click", async () => {
     lastUndoSnapshot = null;
     currentRouteStartPoint = data.route.startPoint || null;
     currentRouteEndPoint = data.route.endPoint || null;
+    lastRouteMeta = data.meta || null;
+    lastRouteEstimated = data.route.estimated || null;
+    lastRouteGeometry = data.route.geometry || null;
+    lastRoutePolyline = data.route.directionsOverviewPolyline || null;
     renderStopList(currentRouteStops);
     renderCompletedStops();
     drawRoute(data.route);
@@ -1125,17 +1458,32 @@ optimizeBtn.addEventListener("click", async () => {
       setStatus(`Success. Strategy: ${data.meta.strategy}`);
     }
     saveRouteProgress();
+    updateShareUrlInBrowser();
+    updateShareButtonState();
+    if (isMobileView() && currentRouteStops.length) {
+      setPanelCollapsed(true);
+    }
+    return true;
   } catch (error) {
     setStatus(error.message, true);
+    return false;
   } finally {
     optimizeBtn.disabled = false;
     scheduleMapResize();
   }
+}
+
+optimizeBtn.addEventListener("click", () => {
+  runOptimize();
 });
 
 (async function initApp() {
   await refreshClientConfig();
   restorePanelCollapsedState();
-  restoreRouteProgress();
+  const loadedFromShare = await loadFromShareUrl();
+  if (!loadedFromShare) {
+    restoreRouteProgress();
+  }
+  updateShareButtonState();
   scheduleMapResize();
 })();

@@ -80,7 +80,15 @@
         <label>Or Upload CSV</label>
         <input id="csvFile" type="file" accept=".csv" />
 
-        <button id="optimizeBtn">Optimize Route</button>
+        <div class="action-buttons">
+          <button id="optimizeBtn" type="button">Optimize Route</button>
+          <button id="shareLinkBtn" type="button" class="secondary-btn share-sidebar-btn" disabled>
+            Share route
+          </button>
+        </div>
+        <div id="shareHint" class="share-hint hidden">
+          Link ready. Send it to your driver — opening it restores this route.
+        </div>
         <div id="status"></div>
         <div id="unresolvedWrap" class="unresolved hidden">
           <strong>Could not find these locations:</strong>
@@ -112,6 +120,14 @@
           aria-controls="sidebar"
         >
           Hide menu
+        </button>
+        <button
+          id="mobileShareBtn"
+          type="button"
+          class="mobile-share-btn hidden"
+          aria-label="Share route"
+        >
+          Share route
         </button>
         <div id="map"></div>
       </main>
