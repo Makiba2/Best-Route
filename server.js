@@ -9,13 +9,14 @@ const { optimizeRoute } = require("./src/services/optimize");
 const {
   fetchPlaceAutocompleteSuggestions,
 } = require("./src/services/placesAutocomplete");
+const { saveSharedRoute, getSharedRoute } = require("./src/services/shareRoute");
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
 const publicDir = path.join(__dirname, "public");
 
 app.use(cors());
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({ limit: "5mb" }));
 app.use(express.static(publicDir));
 
 app.get("/", (req, res) => {
@@ -190,6 +191,29 @@ app.post("/api/optimize-route", async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       error: error.message || "Unexpected server error.",
+    });
+  }
+});
+
+app.post("/api/share-route", async (req, res) => {
+  try {
+    const { payload } = req.body || {};
+    const id = await saveSharedRoute(payload);
+    return res.status(201).json({ id });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      error: error.message || "Could not save shared route.",
+    });
+  }
+});
+
+app.get("/api/share-route/:id", async (req, res) => {
+  try {
+    const payload = await getSharedRoute(req.params.id);
+    return res.json({ payload });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      error: error.message || "Could not load shared route.",
     });
   }
 });
