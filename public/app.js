@@ -55,7 +55,6 @@ const STOP_REACHED_RADIUS_M = 45;
 const ROUTE_PROGRESS_STORAGE_KEY = "best-route-progress-v1";
 const PANEL_COLLAPSED_STORAGE_KEY = "best-route-panel-collapsed";
 const SHARE_HASH_PREFIX = "r=";
-const MAX_SHARE_URL_LENGTH = 8000;
 let lastRouteMeta = null;
 let lastRouteEstimated = null;
 let lastRouteGeometry = null;
@@ -79,16 +78,6 @@ map.on("dragstart", () => {
   lastMapInteractionAt = Date.now();
 });
 
-function encodeSharePayload(payload) {
-  const json = JSON.stringify(payload);
-  const bytes = new TextEncoder().encode(json);
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
 function decodeSharePayload(encoded) {
   try {
     let base64 = String(encoded || "").replace(/-/g, "+").replace(/_/g, "/");
@@ -101,10 +90,42 @@ function decodeSharePayload(encoded) {
   }
 }
 
-function getSharePayloadFromUrl() {
+function getShareRefFromUrl() {
   const hash = String(window.location.hash || "").replace(/^#/, "");
   if (!hash.startsWith(SHARE_HASH_PREFIX)) return null;
-  return decodeSharePayload(hash.slice(SHARE_HASH_PREFIX.length));
+  return hash.slice(SHARE_HASH_PREFIX.length);
+}
+
+function isServerShareId(ref) {
+  return /^[A-Za-z0-9_-]{6,32}$/.test(String(ref || ""));
+}
+
+function buildShareUrlFromId(id) {
+  const url = new URL(window.location.href);
+  url.search = "";
+  url.hash = `${SHARE_HASH_PREFIX}${id}`;
+  return url.toString();
+}
+
+async function createShareUrl() {
+  const payload = buildSharePayload();
+  if (!payload) return null;
+
+  const response = await fetch("/api/share-route", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ payload }),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || "Could not save shared route.");
+  }
+
+  if (!data.id) {
+    throw new Error("Could not create share link.");
+  }
+
+  return buildShareUrlFromId(data.id);
 }
 
 function buildSharePayload() {
@@ -146,24 +167,13 @@ function buildSharePayload() {
   return payload;
 }
 
-function buildShareUrl() {
-  const payload = buildSharePayload();
-  if (!payload) return null;
-
-  const encoded = encodeSharePayload(payload);
-  const url = new URL(window.location.href);
-  url.search = "";
-  url.hash = `${SHARE_HASH_PREFIX}${encoded}`;
-  return url.toString();
-}
-
-function updateShareUrlInBrowser() {
-  const shareUrl = buildShareUrl();
-  if (!shareUrl) return;
+async function updateShareUrlInBrowser() {
   try {
+    const shareUrl = await createShareUrl();
+    if (!shareUrl) return;
     history.replaceState(null, "", shareUrl);
   } catch (error) {
-    // Ignore history failures (older browsers / file://).
+    // Ignore background share-url updates (optimize still succeeded).
   }
 }
 
@@ -230,26 +240,37 @@ function showShareHint(message) {
 }
 
 async function shareRouteLink() {
-  const shareUrl = buildShareUrl();
-  if (!shareUrl) {
-    setStatus("Add at least one address before sharing.", true);
-    return;
-  }
-
-  if (shareUrl.length > MAX_SHARE_URL_LENGTH) {
-    setStatus(
-      "This route is too large to share as a link. Remove some stops or split into smaller routes.",
-      true,
-    );
-    return;
-  }
-
   const stopCount = getShareStopCount();
   const shareTitle = "Delivery route";
   const shareText =
     stopCount > 0
       ? `Delivery route with ${stopCount} stop${stopCount === 1 ? "" : "s"}`
       : "Delivery route";
+
+  let shareUrl;
+  try {
+    setStatus("Creating share link...");
+    if (shareLinkBtn) shareLinkBtn.disabled = true;
+    if (mobileShareBtn) mobileShareBtn.disabled = true;
+    shareUrl = await createShareUrl();
+  } catch (error) {
+    setStatus(error.message || "Could not create share link.", true);
+    updateShareButtonState();
+    return;
+  } finally {
+    updateShareButtonState();
+  }
+
+  if (!shareUrl) {
+    setStatus("Add at least one address before sharing.", true);
+    return;
+  }
+
+  try {
+    history.replaceState(null, "", shareUrl);
+  } catch (error) {
+    // Ignore history failures.
+  }
 
   if (canUseNativeShare() && isMobileView()) {
     try {
@@ -359,10 +380,7 @@ function applySharedInput(payload) {
   updateShareButtonState();
 }
 
-async function loadFromShareUrl() {
-  const payload = getSharePayloadFromUrl();
-  if (!payload || payload.v !== 1) return false;
-
+async function applySharePayload(payload) {
   if (payload.kind === "route" && Array.isArray(payload.stops) && payload.stops.length) {
     applySharedRoute(payload);
     focusMapAfterShareLoad();
@@ -378,6 +396,32 @@ async function loadFromShareUrl() {
   }
 
   return false;
+}
+
+async function loadFromShareUrl() {
+  const ref = getShareRefFromUrl();
+  if (!ref) return false;
+
+  const inlinePayload = decodeSharePayload(ref);
+  if (inlinePayload?.v === 1) {
+    return applySharePayload(inlinePayload);
+  }
+
+  if (!isServerShareId(ref)) return false;
+
+  setStatus("Loading shared route...");
+  try {
+    const response = await fetch(`/api/share-route/${encodeURIComponent(ref)}`);
+    const data = await response.json();
+    if (!response.ok) {
+      setStatus(data.error || "Shared route not found or expired.", true);
+      return false;
+    }
+    return applySharePayload(data.payload);
+  } catch (error) {
+    setStatus("Could not load shared route.", true);
+    return false;
+  }
 }
 
 function setStatus(message, isError = false) {
@@ -1458,7 +1502,7 @@ async function runOptimize() {
       setStatus(`Success. Strategy: ${data.meta.strategy}`);
     }
     saveRouteProgress();
-    updateShareUrlInBrowser();
+    await updateShareUrlInBrowser();
     updateShareButtonState();
     if (isMobileView() && currentRouteStops.length) {
       setPanelCollapsed(true);
